@@ -62,6 +62,10 @@ import net.md_5.bungee.protocol.packet.StatusResponse;
 @RequiredArgsConstructor
 public class InitialHandler extends PacketHandler implements PendingConnection
 {
+    private static final BaseComponent[] THROTTLE_REASON = new net.md_5.bungee.api.chat.ComponentBuilder( "Du hast dich zu schnell wiederverbunden, warte bitte mindestens " + ( ( BungeeCord.getInstance().getConfig().getThrottle() / 1000 ) + 2 ) + " Sekunden." )
+            .color( ChatColor.RED )
+            .create();
+    private static final boolean logThrottled = Boolean.valueOf( System.getProperty( "me.minotopia.bungeecord.logThrottled", "false" ) );
 
     private final ProxyServer bungee;
     private ChannelWrapper ch;
@@ -212,7 +216,6 @@ public class InitialHandler extends PacketHandler implements PendingConnection
                     @Override
                     public void done(ProxyPingEvent pingResult, Throwable error)
                     {
-                        BungeeCord.getInstance().getConnectionThrottle().unthrottle( getAddress().getAddress() );
                         Gson gson = handshake.getProtocolVersion() == ProtocolConstants.MINECRAFT_1_7_2 ? BungeeCord.getInstance().gsonLegacy : BungeeCord.getInstance().gson;
                         unsafe.sendPacket( new StatusResponse( gson.toJson( pingResult.getResponse() ) ) );
                     }
@@ -296,6 +299,18 @@ public class InitialHandler extends PacketHandler implements PendingConnection
     @Override
     public void handle(LoginRequest loginRequest) throws Exception
     {
+        // should only be used if its definitely NO ping / status request
+        // as otherwise pings after status requests are blocked
+        // throttle should not be used in handle(Handshake) as its impossible to give the user a proper message at that state
+        if (BungeeCord.getInstance().getConnectionThrottle().throttle( ( (InetSocketAddress) ch.getHandle().remoteAddress() ).getAddress() ) )
+        {
+            if ( logThrottled )
+            {
+                bungee.getLogger().log( Level.INFO, "{0} throttled", this );
+            }
+            disconnect(THROTTLE_REASON);
+            return;
+        }
         Preconditions.checkState( thisState == State.USERNAME, "Not expecting USERNAME" );
         this.loginRequest = loginRequest;
 
